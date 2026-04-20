@@ -69,11 +69,6 @@ a { color: inherit; text-decoration: none; }
 .nav { position: fixed; top: 38px; left: 0; right: 0; z-index: 100; padding: 18px var(--pad); display: flex; justify-content: space-between; align-items: center; background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); border-bottom: 1px solid var(--line); color: var(--ink); opacity: 0; animation: fadeIn 1s ease 1.4s forwards; }
 .nav-brand { display: flex; align-items: center; width: 110px; color: inherit; }
 .nav-brand svg { width: 100%; height: auto; color: inherit; }
-.nav-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); transition: opacity 0.4s ease, transform 0.4s ease; }
-.hero-placeholder-tag { font-family: var(--support); font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--muted); padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
-.hero-placeholder-tag::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ff4d4d; margin-right: 8px; vertical-align: middle; animation: pulse 2s ease-in-out infinite; }
-.nav-center.hidden { opacity: 0; transform: translate(-50%, calc(-50% - 6px)); pointer-events: none; }
-@keyframes pulse { 50% { opacity: 0.3; } }
 
 .nav-links { display: flex; gap: 36px; font-family: var(--sans); font-weight: 500; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
 .nav-links a { transition: opacity 0.3s; }
@@ -91,7 +86,9 @@ a { color: inherit; text-decoration: none; }
 
 .hero { position: relative; height: 100vh; height: 100svh; min-height: 640px; overflow: hidden; background: var(--ink); display: flex; align-items: center; padding: 0 var(--pad); }
 .hero-video { position: absolute; inset: 0; background: var(--ink); overflow: hidden; }
-.hero-video video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+.hero-video video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; will-change: opacity, transform; transform: translateZ(0); backface-visibility: hidden; }
+.hero-video-layer { opacity: 0; transition: opacity 0.6s ease; }
+.hero-video-layer.is-active { opacity: 1; }
 .hero-video::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.55) 100%); z-index: 2; pointer-events: none; }
 .hero-noise { position: absolute; inset: 0; opacity: 0.06; pointer-events: none; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 .hero-content { position: relative; z-index: 3; color: var(--bg); text-align: left; max-width: 1400px; width: 100%; padding-top: 90px; }
@@ -262,9 +259,6 @@ footer { padding: 40px var(--pad); max-width: var(--max); margin: 0 auto; border
 
 <nav class="nav" id="nav">
   <a href="#top" class="nav-brand" id="navBrand" aria-label="ag.FAMA"></a>
-  <div class="nav-center" id="navCenter">
-    <span class="hero-placeholder-tag">Demo Reel Placeholder</span>
-  </div>
   <div class="nav-links">
     <a href="#work" data-i18n="nav.work">Work</a>
     <a href="#studio" data-i18n="nav.studio">Studio</a>
@@ -298,7 +292,10 @@ footer { padding: 40px var(--pad); max-width: var(--max); margin: 0 auto; border
 
 <section class="hero" id="top">
   <div class="hero-video">
-    <video autoplay muted loop playsinline webkit-playsinline disablepictureinpicture preload="auto">
+    <video id="heroVideoA" class="hero-video-layer is-active" autoplay muted loop playsinline webkit-playsinline disablepictureinpicture preload="auto">
+      <source src="./hero-reel.mp4" type="video/mp4">
+    </video>
+    <video id="heroVideoB" class="hero-video-layer" muted loop playsinline webkit-playsinline disablepictureinpicture preload="auto" aria-hidden="true">
       <source src="./hero-reel.mp4" type="video/mp4">
     </video>
   </div>
@@ -633,15 +630,47 @@ function animateSignature(svg) {
   });
 }
 
-var navCenter = document.getElementById('navCenter');
-var hero = document.querySelector('.hero');
+(function setupSeamlessHeroLoop() {
+  var vA = document.getElementById('heroVideoA');
+  var vB = document.getElementById('heroVideoB');
+  if (!vA || !vB) return;
 
-function onScroll() {
-  var heroBottom = hero.offsetHeight - 120;
-  navCenter.classList.toggle('hidden', window.scrollY > heroBottom);
-}
-window.addEventListener('scroll', onScroll, { passive: true });
-onScroll();
+  var CROSSFADE_LEAD = 0.4;
+  var FADE_MS = 600;
+
+  function prime(v) { try { v.pause(); v.currentTime = 0; } catch (e) {} }
+
+  function scheduleSwap(outgoing, incoming) {
+    function tick() {
+      var d = outgoing.duration;
+      if (!d || isNaN(d) || !isFinite(d)) { requestAnimationFrame(tick); return; }
+      if (d - outgoing.currentTime <= CROSSFADE_LEAD) {
+        try { incoming.currentTime = 0; } catch (e) {}
+        var p = incoming.play();
+        if (p && p.catch) p.catch(function(){});
+        incoming.classList.add('is-active');
+        outgoing.classList.remove('is-active');
+        setTimeout(function() {
+          prime(outgoing);
+          scheduleSwap(incoming, outgoing);
+        }, FADE_MS + 80);
+      } else {
+        requestAnimationFrame(tick);
+      }
+    }
+    tick();
+  }
+
+  function start() {
+    prime(vB);
+    var p = vA.play();
+    if (p && p.catch) p.catch(function(){});
+    scheduleSwap(vA, vB);
+  }
+
+  if (vA.readyState >= 1) start();
+  else vA.addEventListener('loadedmetadata', start, { once: true });
+})();
 
 var revealObserver = new IntersectionObserver(function(entries) {
   entries.forEach(function(entry) {
